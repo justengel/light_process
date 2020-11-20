@@ -15,7 +15,7 @@ Example
 .. code-block:: python
 
     # readme_module.py
-    import light_process
+    import light_process as lp
     import multiprocessing as mp
 
 
@@ -24,7 +24,7 @@ Example
 
 
     def run_light_process():
-        proc = light_process.LightProcess(target=run)
+        proc = lp.LightProcess(target=run)
         proc.start()
         proc.join()
 
