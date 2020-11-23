@@ -8,6 +8,21 @@ import multiprocessing as mp
 __all__ = ['LightProcess']
 
 
+FREEZE_CALLED = False
+
+
+def freeze_support():
+    """You do not need to call this function.
+
+    Spawns a new process here and quits the current process. This allows executables to spawn new processes without
+    infinite recursion.
+    """
+    global FREEZE_CALLED
+    if not FREEZE_CALLED:
+        mp.freeze_support()
+        FREEZE_CALLED = True
+
+
 class LightProcess(mp.Process):
     """Process that only uses the specified module or the module that creates the LightProcess object.
 
@@ -46,14 +61,20 @@ class LightProcess(mp.Process):
         This must be called at most once per process object. It arranges for the object’s run() method to be invoked
         in a separate process.
         """
+        # Make sure freeze_support was called before starting your first LightProcess.
+        freeze_support()
+
+        # Setup the main module
         if self._target_module is None:
             self._target_module = inspect.getmodule(inspect.currentframe().f_back)
         orig = sys.modules['__main__']
         sys.modules['__main__'] = self._target_module
         del self._target_module  # Cannot pickle module object
 
+        # Start the process
         super().start()
 
+        # Reset the main module
         self._target_module = sys.modules['__main__']  # Re-save the target module
         sys.modules['__main__'] = orig
         return self
