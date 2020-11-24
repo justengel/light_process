@@ -75,6 +75,8 @@ class LightProcess(MpProcess):
         if self._target_module is None:
             self._target_module = inspect.getmodule(inspect.currentframe().f_back)
         orig = sys.modules['__main__']
+        if getattr(self._target_module, '__spec__', None) is None:
+            self._target_module.__spec__ = getattr(orig, '__spec__', None)
         sys.modules['__main__'] = self._target_module
         del self._target_module  # Cannot pickle module object
 
