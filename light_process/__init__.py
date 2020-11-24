@@ -3,11 +3,18 @@ from light_process.__meta__ import version as __version__
 import sys
 import inspect
 import multiprocessing as mp
+from multiprocessing import *
+
+try:
+    mp_all = mp.__all__
+except (AttributeError, Exception):
+    mp_all = []
 
 
-__all__ = ['LightProcess']
+__all__ = mp_all + ['LightProcess', 'Process', 'freeze_support', 'MpProcess']
 
 
+MpProcess = mp.Process
 FREEZE_CALLED = False
 
 
@@ -23,7 +30,7 @@ def freeze_support():
         FREEZE_CALLED = True
 
 
-class LightProcess(mp.Process):
+class LightProcess(MpProcess):
     """Process that only uses the specified module or the module that creates the LightProcess object.
 
     Args:
@@ -78,3 +85,6 @@ class LightProcess(mp.Process):
         self._target_module = sys.modules['__main__']  # Re-save the target module
         sys.modules['__main__'] = orig
         return self
+
+
+Process = LightProcess
