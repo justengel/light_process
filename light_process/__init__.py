@@ -2,6 +2,7 @@ from light_process.__meta__ import version as __version__
 
 import sys
 import inspect
+import contextlib
 import multiprocessing as mp
 from multiprocessing import *
 
@@ -74,19 +75,37 @@ class LightProcess(MpProcess):
         # Setup the main module
         if self._target_module is None:
             self._target_module = inspect.getmodule(inspect.currentframe().f_back)
-        orig = sys.modules['__main__']
-        if getattr(self._target_module, '__spec__', None) is None:
-            self._target_module.__spec__ = getattr(orig, '__spec__', None)
-        sys.modules['__main__'] = self._target_module
-        del self._target_module  # Cannot pickle module object
 
-        # Start the process
-        super().start()
-
-        # Reset the main module
-        self._target_module = sys.modules['__main__']  # Re-save the target module
-        sys.modules['__main__'] = orig
+        with self.change_main():
+            # Start the process
+            super().start()
         return self
+
+    @contextlib.contextmanager
+    def change_main(self):
+        """Change sys.modules['__main__'] to the target module for this block."""
+        if self._target_module is None:
+            # Do not change main for the block
+            yield
+
+        else:
+            # Change main for the block
+            orig = sys.modules['__main__']
+
+            # Check target spec
+            if getattr(self._target_module, '__spec__', None) is None:
+                self._target_module.__spec__ = getattr(orig, '__spec__', None)
+
+            # Change __main__
+            sys.modules['__main__'] = self._target_module
+            del self._target_module  # Cannot pickle module object
+
+            try:
+                yield
+            finally:
+                # Reset __main__
+                self._target_module = sys.modules['__main__']  # Re-save the target module
+                sys.modules['__main__'] = orig
 
 
 Process = LightProcess
