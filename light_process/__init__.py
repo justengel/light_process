@@ -1,4 +1,5 @@
 from light_process.__meta__ import version as __version__
+from light_process.utils import FileQueue, StdoutQueue, StderrQueue
 
 import sys
 import inspect
@@ -12,11 +13,19 @@ except (AttributeError, Exception):
     mp_all = []
 
 
-__all__ = mp_all + ['LightProcess', 'Process', 'freeze_support', 'MpProcess']
+__all__ = mp_all + ['LightProcess', 'Process', 'freeze_support', 'MpProcess',
+                    'FileQueue', 'StdoutQueue', 'StderrQueue']
 
 
 MpProcess = mp.Process
 FREEZE_CALLED = False
+mp_freeze_support = freeze_support
+
+
+def has_freeze_support():
+    """Return if freeze_support was called."""
+    global FREEZE_CALLED
+    return FREEZE_CALLED
 
 
 def freeze_support():
@@ -27,8 +36,34 @@ def freeze_support():
     """
     global FREEZE_CALLED
     if not FREEZE_CALLED:
-        mp.freeze_support()
+        mp_freeze_support()
         FREEZE_CALLED = True
+
+
+mp.freeze_support = freeze_support
+
+
+def run_with_output(*args, **kwargs):
+    """Run the main multiprocessing function while saving stdout and/or stderr."""
+    # Get variables
+    target = kwargs.pop('LP_TARGET_FUNC')  # Raise Error. Do not use this if a target was not given
+    out_queue = kwargs.pop('LP_STDOUT_QUEUE', None)
+    err_queue = kwargs.pop('LP_STDERR_QUEUE', None)
+
+    # Save output
+    if out_queue:
+        sys.stdout = out_queue
+    if err_queue:
+        sys.stderr = err_queue
+
+    # Run the function
+    target(*args, **kwargs)
+
+    # Reset output
+    if out_queue:
+        sys.stdout = sys.__stdout__
+    if err_queue:
+        sys.stderr = sys.__stderr__
 
 
 class LightProcess(MpProcess):
@@ -45,8 +80,8 @@ class LightProcess(MpProcess):
         target_module (ModuleType)[None]: Module to import. The multiprocessing.Process uses '__main__'. This allows
             you to only import a smaller portion of code for your process.
     """
-    def __init__(self, group=None, target=None, name=None, args=(), kwargs={},
-                 *, daemon=None, target_module=None):
+    def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None,
+                 target_module=None, save_stdout=False, save_stderr=False):
         """Process that only uses the specified module or the module that creates the LightProcess object.
 
         Args:
@@ -59,9 +94,15 @@ class LightProcess(MpProcess):
                 inherited from the creating process.
             target_module (ModuleType)[None]: Module to import. The multiprocessing.Process uses '__main__'. This allows
                 you to only import a smaller portion of code for your process.
+            save_stdout (bool)[False]: If True use a queue to save stdout.
+            save_stderr (bool)[False]: If True use a queue to save stderr.
         """
         self._target_module = target_module
-        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
+        self.save_stdout = save_stdout
+        self.save_stderr = save_stderr
+        self.stdout = None
+        self.stderr = None
+        super(LightProcess, self).__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
 
     def start(self):
         """Start the process’s activity.
@@ -70,16 +111,30 @@ class LightProcess(MpProcess):
         in a separate process.
         """
         # Make sure freeze_support was called before starting your first LightProcess.
-        freeze_support()
+        if getattr(sys, 'frozen', False) and not has_freeze_support():
+            freeze_support()
 
         # Setup the main module
         if self._target_module is None:
             self._target_module = inspect.getmodule(inspect.currentframe().f_back)
 
         with self.change_main():
+            # Try to change to save output
+            self.setup_output()
+
             # Start the process
-            super().start()
+            super(LightProcess, self).start()
+
         return self
+
+    def join(self, timeout=None):
+        """Wait until child process terminates
+
+        Args:
+            timeout (float/int)[None]: Time to wait for the process to terminate.
+        """
+        super(LightProcess, self).join(timeout)
+        self.teardown_output()
 
     @contextlib.contextmanager
     def change_main(self):
@@ -107,5 +162,46 @@ class LightProcess(MpProcess):
                 self._target_module = sys.modules['__main__']  # Re-save the target module
                 sys.modules['__main__'] = orig
 
+    def setup_output(self):
+        """Change what function is running to allow for saving the output."""
+        if self.save_stdout or self.save_stderr:
+            self._orig_kwargs = getattr(self, '_kwargs', {}).copy()
+
+            # Get the output queues
+            self._out_queue = None
+            self._err_queue = None
+            if self.save_stdout:
+                self._kwargs['LP_STDOUT_QUEUE'] = self._out_queue = StdoutQueue()
+            if self.save_stderr:
+                self._kwargs['LP_STDERR_QUEUE'] = self._err_queue = StderrQueue()
+
+            # Pass the target function into the run_with_output function
+            self._kwargs['LP_TARGET_FUNC'] = self._target
+            self._target = run_with_output
+
+    def teardown_output(self):
+        """Change the function back to the original after saving the output."""
+        if self.save_stdout or self.save_stderr:
+            self._kwargs = self._orig_kwargs
+            if self._err_queue:
+                self.stderr = ''.join((self._err_queue.get() for _ in range(self._err_queue.qsize())))
+            if self._out_queue:
+                self.stdout = ''.join((self._out_queue.get() for _ in range(self._out_queue.qsize())))
+
+            try:
+                del self._orig_kwargs
+            except (AttributeError, Exception):
+                pass
+            try:
+                del self._err_queue
+            except (AttributeError, Exception):
+                pass
+            try:
+                del self._out_queue
+            except (AttributeError, Exception):
+                pass
+
 
 Process = LightProcess
+
+
