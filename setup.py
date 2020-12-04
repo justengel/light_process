@@ -7,13 +7,14 @@ See Also:
 """
 import os
 import glob
+import pathlib
 import sys
 from setuptools import setup, Extension, find_packages
 
 
 def read(fname):
     """Read in a file"""
-    with open(os.path.join(os.path.dirname(__file__), fname), 'r') as file:
+    with open(os.path.join(str(pathlib.Path().absolute()), fname), 'r') as file:
         return file.read()
 
 
