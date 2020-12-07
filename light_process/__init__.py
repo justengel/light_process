@@ -61,8 +61,10 @@ def run_with_output(*args, **kwargs):
 
     # Reset output
     if out_queue:
+        out_queue.put_sentinel()  # Sentinel to detect when finished
         sys.stdout = sys.__stdout__
     if err_queue:
+        err_queue.put_sentinel()  # Sentinel to detect when finished
         sys.stderr = sys.__stderr__
 
 
@@ -184,22 +186,17 @@ class LightProcess(MpProcess):
         if self.save_stdout or self.save_stderr:
             self._kwargs = self._orig_kwargs
             if self._err_queue:
-                self.stderr = ''.join((self._err_queue.get() for _ in range(self._err_queue.qsize())))
+                self.stderr = self._err_queue.get_all()
             if self._out_queue:
-                self.stdout = ''.join((self._out_queue.get() for _ in range(self._out_queue.qsize())))
+                self.stdout = self._out_queue.get_all()
 
-            try:
+
+            with contextlib.suppress(AttributeError, Exception):
                 del self._orig_kwargs
-            except (AttributeError, Exception):
-                pass
-            try:
+            with contextlib.suppress(AttributeError, Exception):
                 del self._err_queue
-            except (AttributeError, Exception):
-                pass
-            try:
+            with contextlib.suppress(AttributeError, Exception):
                 del self._out_queue
-            except (AttributeError, Exception):
-                pass
 
 
 Process = LightProcess
