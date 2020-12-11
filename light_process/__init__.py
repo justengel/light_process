@@ -2,6 +2,7 @@ from light_process.__meta__ import version as __version__
 from light_process.utils import FileQueue, StdoutQueue, StderrQueue
 
 import sys
+import types
 import inspect
 import contextlib
 import multiprocessing as mp
@@ -57,15 +58,16 @@ def run_with_output(*args, **kwargs):
         sys.stderr = err_queue
 
     # Run the function
-    target(*args, **kwargs)
-
-    # Reset output
-    if out_queue:
-        out_queue.put_sentinel()  # Sentinel to detect when finished
-        sys.stdout = sys.__stdout__
-    if err_queue:
-        err_queue.put_sentinel()  # Sentinel to detect when finished
-        sys.stderr = sys.__stderr__
+    try:
+        target(*args, **kwargs)
+    finally:
+        # Reset output
+        if out_queue is not None:
+            out_queue.put_sentinel()  # Sentinel to detect when finished
+            sys.stdout = sys.__stdout__
+        if err_queue is not None:
+            err_queue.put_sentinel()  # Sentinel to detect when finished
+            sys.stderr = sys.__stderr__
 
 
 class LightProcess(MpProcess):
@@ -113,7 +115,7 @@ class LightProcess(MpProcess):
         in a separate process.
         """
         # Make sure freeze_support was called before starting your first LightProcess.
-        if getattr(sys, 'frozen', False) and not has_freeze_support():
+        if not has_freeze_support():
             freeze_support()
 
         # Setup the main module
@@ -138,10 +140,15 @@ class LightProcess(MpProcess):
         super(LightProcess, self).join(timeout)
         self.teardown_output()
 
+    def join_on_sentinel(self, timeout=1):
+        """Wait until the sentinel is received then call join for a short timeout."""
+        self.teardown_output()
+        super(LightProcess, self).join(timeout)
+
     @contextlib.contextmanager
     def change_main(self):
         """Change sys.modules['__main__'] to the target module for this block."""
-        if self._target_module is None:
+        if not isinstance(self._target_module, types.ModuleType):
             # Do not change main for the block
             yield
 
@@ -149,7 +156,7 @@ class LightProcess(MpProcess):
             # Change main for the block
             orig = sys.modules['__main__']
 
-            # Check target spec
+            # Check target spec if not exists
             if getattr(self._target_module, '__spec__', None) is None:
                 self._target_module.__spec__ = getattr(orig, '__spec__', None)
 
@@ -157,6 +164,7 @@ class LightProcess(MpProcess):
             sys.modules['__main__'] = self._target_module
             del self._target_module  # Cannot pickle module object
 
+            # Run the context block
             try:
                 yield
             finally:

@@ -53,8 +53,28 @@ def run_print_stderr():
     assert proc.stderr is None
 
 
+def run_normal_mp():
+    import light_process as lp
+
+    print('\n===== Save Ouptut =====')
+    proc = lp.Process(target=print_stderr, target_module=False, save_stderr=True)
+    proc.start()
+    proc.join()
+
+    assert 'def' in proc.stderr, proc.stderr
+    assert '456' in proc.stderr, proc.stderr
+    assert 'Goodbye John' in proc.stderr, proc.stderr
+
+    print('\n===== Do Not Save Ouptut =====')
+    proc = lp.Process(target=print_stderr, save_stderr=False)
+    proc.start()
+    proc.join()
+
+    assert proc.stderr is None
+
 if __name__ == '__main__':
-    run_print_stdout()
-    run_print_stderr()
+    # run_print_stdout()
+    # run_print_stderr()
+    run_normal_mp()
 
     print('All tests finished successfully!')
